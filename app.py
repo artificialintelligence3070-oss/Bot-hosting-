@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, render_template_string
-from flask_cors import CORS
 import threading
 import requests
 import json
@@ -7,464 +6,291 @@ import time
 import os
 from datetime import datetime
 
-# Create Flask app - THIS MUST BE NAMED 'app' for gunicorn
 app = Flask(__name__)
-CORS(app)
 
 # Store running bots
 running_bots = {}
 
 # ============================================================
-# HTML Frontend
+# SIMPLE HTML FRONTEND
 # ============================================================
 
 HTML_PAGE = """
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FT-OSINT Bot Hosting</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #ffffff;
-            min-height: 100vh;
-            overflow-x: hidden;
+        body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; }
+        .header { text-align: center; padding: 30px 0; }
+        .header h1 { font-size: 28px; color: #333; }
+        .header p { color: #666; margin-top: 10px; }
+        .card {
+            background: white; border-radius: 12px; padding: 20px;
+            margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        .bg-3d {
-            position: fixed; top: 0; left: 0;
-            width: 100%; height: 100%;
-            z-index: 0; pointer-events: none;
-        }
-        .cube {
-            position: absolute; width: 60px; height: 60px;
-            border: 2px solid rgba(102, 126, 234, 0.12);
-            animation: float 8s infinite ease-in-out;
-            transform-style: preserve-3d;
-        }
-        .cube:nth-child(1) { top: 10%; left: 10%; animation-delay: 0s; }
-        .cube:nth-child(2) { top: 20%; left: 80%; animation-delay: 1s; }
-        .cube:nth-child(3) { top: 60%; left: 15%; animation-delay: 2s; }
-        .cube:nth-child(4) { top: 70%; left: 70%; animation-delay: 3s; }
-        .cube:nth-child(5) { top: 40%; left: 50%; animation-delay: 4s; }
-        .cube:nth-child(6) { top: 85%; left: 30%; animation-delay: 5s; }
-        .cube:nth-child(7) { top: 15%; left: 45%; animation-delay: 1.5s; }
-        .cube:nth-child(8) { top: 50%; left: 85%; animation-delay: 2.5s; }
-        @keyframes float {
-            0%, 100% { transform: translateY(0) rotateX(0deg) rotateY(0deg); }
-            25% { transform: translateY(-20px) rotateX(90deg) rotateY(45deg); }
-            50% { transform: translateY(0) rotateX(180deg) rotateY(90deg); }
-            75% { transform: translateY(20px) rotateX(270deg) rotateY(135deg); }
-        }
-        .container {
-            position: relative; z-index: 1;
-            max-width: 500px; margin: 0 auto; padding: 20px;
-        }
-        .header {
-            text-align: center; padding: 30px 0 20px;
-        }
-        .logo {
-            width: 80px; height: 80px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 20px;
-            display: flex; align-items: center; justify-content: center;
-            margin: 0 auto 15px; font-size: 36px;
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-        }
-        .header h1 { font-size: 24px; color: #2d3748; font-weight: 700; }
-        .header p { color: #718096; font-size: 14px; margin-top: 5px; }
-        .section {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 16px; padding: 20px;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            border: 1px solid rgba(0, 0, 0, 0.05);
-            animation: slideUp 0.5s ease-out;
-        }
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .section-title {
-            font-size: 16px; font-weight: 700; color: #2d3748;
-            margin-bottom: 15px;
-            display: flex; align-items: center; gap: 8px;
-        }
-        .section-title .icon { font-size: 20px; }
+        .card h2 { font-size: 18px; color: #333; margin-bottom: 15px; }
         .input-group { margin-bottom: 15px; }
-        .input-group label {
-            display: block; font-size: 13px; font-weight: 600;
-            color: #4a5568; margin-bottom: 6px;
-        }
+        .input-group label { display: block; font-size: 14px; color: #555; margin-bottom: 5px; font-weight: bold; }
         .input-group input {
-            width: 100%; padding: 14px 16px;
-            border: 2px solid #e2e8f0; border-radius: 12px;
-            font-size: 14px; transition: all 0.3s; background: #f7fafc;
+            width: 100%; padding: 12px; border: 2px solid #ddd;
+            border-radius: 8px; font-size: 14px;
         }
-        .input-group input:focus {
-            outline: none; border-color: #667eea; background: #fff;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        .input-group .hint {
-            font-size: 11px; color: #a0aec0; margin-top: 4px;
-        }
+        .input-group input:focus { outline: none; border-color: #667eea; }
         .tools-grid {
             display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
         }
-        .tool-card {
-            padding: 14px; border: 2px solid #e2e8f0;
-            border-radius: 12px; cursor: pointer;
-            text-align: center; transition: all 0.3s;
-            background: #f7fafc; position: relative; overflow: hidden;
-            user-select: none;
+        .tool-btn {
+            padding: 12px; border: 2px solid #ddd; border-radius: 8px;
+            cursor: pointer; text-align: center; background: #f8f9fa;
+            transition: all 0.3s;
         }
-        .tool-card:hover {
-            border-color: #667eea; transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        .tool-btn:hover { border-color: #667eea; }
+        .tool-btn.selected {
+            border-color: #667eea; background: #667eea; color: white;
         }
-        .tool-card.selected {
-            border-color: #667eea;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
-        .tool-card .tool-icon { font-size: 28px; margin-bottom: 6px; display: block; }
-        .tool-card .tool-name { font-size: 12px; font-weight: 600; }
-        .all-tools-toggle {
+        .tool-btn .icon { font-size: 24px; display: block; margin-bottom: 5px; }
+        .tool-btn .name { font-size: 12px; font-weight: bold; }
+        .toggle-all {
             display: flex; align-items: center; justify-content: center;
             gap: 10px; padding: 12px; margin-bottom: 15px;
-            background: #edf2f7; border-radius: 10px;
-            cursor: pointer; transition: all 0.3s;
+            background: #e9ecef; border-radius: 8px; cursor: pointer;
         }
-        .all-tools-toggle.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        .toggle-switch {
-            width: 44px; height: 24px; background: #cbd5e0;
-            border-radius: 12px; position: relative; transition: all 0.3s;
-        }
-        .toggle-switch::after {
-            content: ''; position: absolute;
-            width: 20px; height: 20px; background: white;
-            border-radius: 50%; top: 2px; left: 2px;
-            transition: all 0.3s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-        .all-tools-toggle.active .toggle-switch { background: rgba(255,255,255,0.3); }
-        .all-tools-toggle.active .toggle-switch::after { left: 22px; }
-        .expiry-options {
-            display: flex; gap: 10px; margin-bottom: 15px;
-        }
-        .expiry-btn {
-            flex: 1; padding: 12px; border: 2px solid #e2e8f0;
-            border-radius: 10px; background: #f7fafc;
-            cursor: pointer; text-align: center;
-            font-size: 13px; font-weight: 600; transition: all 0.3s;
-        }
-        .expiry-btn.active {
-            border-color: #667eea;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        .expiry-input { display: none; }
-        .expiry-input.show { display: block; animation: fadeIn 0.3s; }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        .toggle-all.active { background: #667eea; color: white; }
         .btn {
-            width: 100%; padding: 16px; border: none;
-            border-radius: 12px; font-size: 15px; font-weight: 700;
-            cursor: pointer; transition: all 0.3s;
-            display: flex; align-items: center; justify-content: center;
-            gap: 8px; margin-bottom: 10px;
+            width: 100%; padding: 15px; border: none; border-radius: 8px;
+            font-size: 16px; font-weight: bold; cursor: pointer;
+            background: #667eea; color: white;
         }
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        .btn:hover { background: #5a6fd6; }
+        .status { margin-top: 10px; padding: 10px; border-radius: 8px; text-align: center; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.loading { background: #fff3cd; color: #856404; }
+        .bot-list { margin-top: 15px; }
+        .bot-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px; border-bottom: 1px solid #eee;
         }
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        .bot-item:last-child { border-bottom: none; }
+        .bot-info { flex: 1; }
+        .bot-token { font-size: 12px; font-weight: bold; color: #333; }
+        .bot-meta { font-size: 11px; color: #666; }
+        .bot-actions { display: flex; gap: 5px; }
+        .btn-small {
+            padding: 6px 12px; border: none; border-radius: 6px;
+            font-size: 12px; cursor: pointer;
         }
-        .btn-success {
-            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
-            color: white; box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3);
+        .btn-stop { background: #dc3545; color: white; }
+        .btn-start { background: #28a745; color: white; }
+        .btn-delete { background: #6c757d; color: white; }
+        .badge {
+            padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold;
         }
-        .btn-danger {
-            background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
-            color: white; box-shadow: 0 4px 15px rgba(245, 101, 101, 0.3);
-        }
-        .btn:disabled {
-            opacity: 0.6; cursor: not-allowed;
-            transform: none !important;
-        }
-        .status-badge {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 6px 12px; border-radius: 20px;
-            font-size: 12px; font-weight: 700;
-        }
-        .status-running { background: #c6f6d5; color: #22543d; }
-        .status-stopped { background: #fed7d7; color: #742a2a; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; animation: blink 1.5s infinite; }
-        .status-running .status-dot { background: #48bb78; }
-        .status-stopped .status-dot { background: #f56565; animation: none; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-        .history-list { max-height: 300px; overflow-y: auto; }
-        .history-item {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 12px; border-bottom: 1px solid #edf2f7;
-            transition: all 0.2s;
-        }
-        .history-item:hover { background: #f7fafc; border-radius: 8px; }
-        .history-item:last-child { border-bottom: none; }
-        .history-info { flex: 1; }
-        .history-token { font-size: 12px; font-weight: 700; color: #2d3748; font-family: monospace; }
-        .history-meta { font-size: 11px; color: #a0aec0; margin-top: 2px; }
-        .history-actions { display: flex; gap: 6px; }
-        .history-btn {
-            padding: 6px 10px; border: none; border-radius: 6px;
-            font-size: 11px; font-weight: 700; cursor: pointer;
-            transition: all 0.2s;
-        }
-        .history-btn-start { background: #c6f6d5; color: #22543d; }
-        .history-btn-stop { background: #fed7d7; color: #742a2a; }
-        .history-btn-delete { background: #e2e8f0; color: #4a5568; }
-        .history-btn:hover { transform: scale(1.05); }
-        .empty-history { text-align: center; padding: 30px; color: #a0aec0; font-size: 14px; }
-        .toast-container {
-            position: fixed; top: 20px; right: 20px; z-index: 2000;
-            display: flex; flex-direction: column; gap: 10px;
-        }
-        .toast {
-            padding: 14px 20px; border-radius: 10px; color: white;
-            font-size: 14px; font-weight: 600;
-            animation: toastSlide 0.3s;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-            display: flex; align-items: center; gap: 8px;
-        }
-        @keyframes toastSlide {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        .toast-success { background: linear-gradient(135deg, #48bb78, #38a169); }
-        .toast-error { background: linear-gradient(135deg, #f56565, #e53e3e); }
-        .toast-info { background: linear-gradient(135deg, #667eea, #764ba2); }
-        @media (max-width: 480px) {
-            .container { padding: 12px; }
-            .section { padding: 15px; border-radius: 12px; }
-            .tools-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
-            .tool-card { padding: 10px; }
-            .tool-card .tool-icon { font-size: 24px; }
-            .header h1 { font-size: 20px; }
-        }
+        .badge.running { background: #d4edda; color: #155724; }
+        .badge.stopped { background: #f8d7da; color: #721c24; }
     </style>
 </head>
 <body>
-    <div class="bg-3d">
-        <div class="cube"></div><div class="cube"></div><div class="cube"></div><div class="cube"></div>
-        <div class="cube"></div><div class="cube"></div><div class="cube"></div><div class="cube"></div>
-    </div>
-    <div class="toast-container" id="toastContainer"></div>
     <div class="container">
         <div class="header">
-            <div class="logo">🤖</div>
-            <h1>FT-OSINT Bot Hosting</h1>
-            <p>⚡ Host bots directly on this server - No download needed!</p>
+            <h1>🤖 FT-OSINT Bot Hosting</h1>
+            <p>Host Telegram bots on this server</p>
         </div>
 
-        <div class="section">
-            <div class="section-title"><span class="icon">⚙️</span>Bot Configuration</div>
+        <div class="card">
+            <h2>⚙️ Bot Configuration</h2>
             <div class="input-group">
                 <label>Telegram Bot Token</label>
-                <input type="text" id="botToken" placeholder="Enter bot token from @BotFather">
-                <div class="hint">Example: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz</div>
+                <input type="text" id="token" placeholder="Enter bot token">
             </div>
             <div class="input-group">
                 <label>Chat ID (Admin)</label>
-                <input type="text" id="chatId" placeholder="Enter your Telegram chat ID">
-                <div class="hint">Your personal chat ID for notifications</div>
+                <input type="text" id="chatId" placeholder="Enter chat ID">
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-title"><span class="icon">🛠️</span>Select Tools</div>
-            <div class="all-tools-toggle" id="allToolsToggle" onclick="toggleAllTools()">
-                <div class="toggle-switch"></div>
-                <span><b>Enable ALL Tools</b> (Lifetime)</span>
+        <div class="card">
+            <h2>🛠️ Select Tools</h2>
+            <div class="toggle-all" id="toggleAll" onclick="toggleAll()">
+                <span>☐</span> <b>Enable ALL Tools</b>
             </div>
             <div class="tools-grid" id="toolsGrid">
-                <div class="tool-card" data-tool="phone" onclick="toggleTool(this)"><span class="tool-icon">📱</span><span class="tool-name">Phone</span></div>
-                <div class="tool-card" data-tool="aadhaar" onclick="toggleTool(this)"><span class="tool-icon">🆔</span><span class="tool-name">Aadhaar</span></div>
-                <div class="tool-card" data-tool="aadhaar_family" onclick="toggleTool(this)"><span class="tool-icon">👨‍👩‍👧</span><span class="tool-name">Aadhaar Family</span></div>
-                <div class="tool-card" data-tool="email" onclick="toggleTool(this)"><span class="tool-icon">📧</span><span class="tool-name">Email</span></div>
-                <div class="tool-card" data-tool="vehicle" onclick="toggleTool(this)"><span class="tool-icon">🚗</span><span class="tool-name">Vehicle</span></div>
-                <div class="tool-card" data-tool="github" onclick="toggleTool(this)"><span class="tool-icon">🐙</span><span class="tool-name">GitHub</span></div>
-                <div class="tool-card" data-tool="instagram" onclick="toggleTool(this)"><span class="tool-icon">📸</span><span class="tool-name">Instagram</span></div>
-                <div class="tool-card" data-tool="tg_user" onclick="toggleTool(this)"><span class="tool-icon">✈️</span><span class="tool-name">Telegram Info</span></div>
-                <div class="tool-card" data-tool="pan" onclick="toggleTool(this)"><span class="tool-icon">🪪</span><span class="tool-name">PAN → GST</span></div>
-                <div class="tool-card" data-tool="tg_id" onclick="toggleTool(this)"><span class="tool-icon">🆔</span><span class="tool-name">Telegram ID</span></div>
-                <div class="tool-card" data-tool="sms_bomber" onclick="toggleTool(this)"><span class="tool-icon">💥</span><span class="tool-name">SMS Bomber</span></div>
+                <div class="tool-btn" data-tool="phone" onclick="toggleTool(this)">
+                    <span class="icon">📱</span>
+                    <span class="name">Phone</span>
+                </div>
+                <div class="tool-btn" data-tool="aadhaar" onclick="toggleTool(this)">
+                    <span class="icon">🆔</span>
+                    <span class="name">Aadhaar</span>
+                </div>
+                <div class="tool-btn" data-tool="aadhaar_family" onclick="toggleTool(this)">
+                    <span class="icon">👨‍👩‍👧</span>
+                    <span class="name">Aadhaar Family</span>
+                </div>
+                <div class="tool-btn" data-tool="email" onclick="toggleTool(this)">
+                    <span class="icon">📧</span>
+                    <span class="name">Email</span>
+                </div>
+                <div class="tool-btn" data-tool="vehicle" onclick="toggleTool(this)">
+                    <span class="icon">🚗</span>
+                    <span class="name">Vehicle</span>
+                </div>
+                <div class="tool-btn" data-tool="github" onclick="toggleTool(this)">
+                    <span class="icon">🐙</span>
+                    <span class="name">GitHub</span>
+                </div>
+                <div class="tool-btn" data-tool="instagram" onclick="toggleTool(this)">
+                    <span class="icon">📸</span>
+                    <span class="name">Instagram</span>
+                </div>
+                <div class="tool-btn" data-tool="tg_user" onclick="toggleTool(this)">
+                    <span class="icon">✈️</span>
+                    <span class="name">Telegram Info</span>
+                </div>
+                <div class="tool-btn" data-tool="pan" onclick="toggleTool(this)">
+                    <span class="icon">🪪</span>
+                    <span class="name">PAN → GST</span>
+                </div>
+                <div class="tool-btn" data-tool="tg_id" onclick="toggleTool(this)">
+                    <span class="icon">🆔</span>
+                    <span class="name">Telegram ID</span>
+                </div>
+                <div class="tool-btn" data-tool="sms_bomber" onclick="toggleTool(this)">
+                    <span class="icon">💥</span>
+                    <span class="name">SMS Bomber</span>
+                </div>
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-title"><span class="icon">⏰</span>Expiry Settings</div>
-            <div class="expiry-options">
-                <div class="expiry-btn active" onclick="setExpiry('lifetime')" id="expLifetime">♾️ Lifetime</div>
-                <div class="expiry-btn" onclick="setExpiry('custom')" id="expCustom">📅 Custom Date</div>
-            </div>
-            <div class="input-group expiry-input" id="customExpiryInput">
-                <label>Expiry Date</label>
-                <input type="date" id="expiryDate">
-                <div class="hint">Bot will stop after this date</div>
+        <div class="card">
+            <h2>⏰ Expiry</h2>
+            <div class="input-group">
+                <label>Expiry Date (leave blank for lifetime)</label>
+                <input type="date" id="expiry">
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-title"><span class="icon">🚀</span>Deploy Bot</div>
-            <button class="btn btn-primary" id="deployBtn" onclick="deployBot()">
-                <span>🚀</span> START BOT ON SERVER
-            </button>
-            <div id="deployStatus" style="margin-top:10px;font-size:13px;color:#718096;text-align:center;"></div>
+        <div class="card">
+            <button class="btn" onclick="deployBot()">🚀 START BOT ON SERVER</button>
+            <div id="status"></div>
         </div>
 
-        <div class="section">
-            <div class="section-title"><span class="icon">📜</span>Running Bots</div>
-            <div class="history-list" id="botList">
-                <div class="empty-history">No bots running. Deploy one above!</div>
+        <div class="card">
+            <h2>📜 Running Bots</h2>
+            <div class="bot-list" id="botList">
+                <p style="text-align:center;color:#666;">No bots running</p>
             </div>
         </div>
     </div>
 
     <script>
-        let selectedTools = new Set();
-        let allToolsEnabled = false;
-        let expiryType = 'lifetime';
-
-        const TOOLS = {
-            phone: 'Phone', aadhaar: 'Aadhaar', aadhaar_family: 'Aadhaar Family',
-            email: 'Email', vehicle: 'Vehicle', github: 'GitHub',
-            instagram: 'Instagram', tg_user: 'Telegram Info', pan: 'PAN',
-            tg_id: 'Telegram ID', sms_bomber: 'SMS Bomber'
-        };
+        var selectedTools = new Set();
+        var allTools = false;
 
         function toggleTool(el) {
-            if (allToolsEnabled) return;
-            const t = el.dataset.tool;
-            if (selectedTools.has(t)) { selectedTools.delete(t); el.classList.remove('selected'); }
-            else { selectedTools.add(t); el.classList.add('selected'); }
-        }
-
-        function toggleAllTools() {
-            allToolsEnabled = !allToolsEnabled;
-            const toggle = document.getElementById('allToolsToggle');
-            const cards = document.querySelectorAll('.tool-card');
-            if (allToolsEnabled) {
-                toggle.classList.add('active');
-                selectedTools = new Set(Object.keys(TOOLS));
-                cards.forEach(c => c.classList.add('selected'));
+            if (allTools) return;
+            var t = el.getAttribute('data-tool');
+            if (selectedTools.has(t)) {
+                selectedTools.delete(t);
+                el.classList.remove('selected');
             } else {
-                toggle.classList.remove('active');
-                selectedTools.clear();
-                cards.forEach(c => c.classList.remove('selected'));
+                selectedTools.add(t);
+                el.classList.add('selected');
             }
         }
 
-        function setExpiry(type) {
-            expiryType = type;
-            document.getElementById('expLifetime').classList.toggle('active', type === 'lifetime');
-            document.getElementById('expCustom').classList.toggle('active', type === 'custom');
-            document.getElementById('customExpiryInput').classList.toggle('show', type === 'custom');
+        function toggleAll() {
+            allTools = !allTools;
+            var toggle = document.getElementById('toggleAll');
+            var btns = document.querySelectorAll('.tool-btn');
+            if (allTools) {
+                toggle.classList.add('active');
+                toggle.innerHTML = '<span>☑</span> <b>ALL TOOLS ENABLED</b>';
+                btns.forEach(function(b) { b.classList.add('selected'); });
+                selectedTools = new Set(['phone','aadhaar','aadhaar_family','email','vehicle','github','instagram','tg_user','pan','tg_id','sms_bomber']);
+            } else {
+                toggle.classList.remove('active');
+                toggle.innerHTML = '<span>☐</span> <b>Enable ALL Tools</b>';
+                btns.forEach(function(b) { b.classList.remove('selected'); });
+                selectedTools.clear();
+            }
         }
 
-        function showToast(msg, type) {
-            const c = document.getElementById('toastContainer');
-            const t = document.createElement('div');
-            t.className = 'toast toast-' + type;
-            const icons = { success: '✅', error: '❌', info: 'ℹ️' };
-            t.innerHTML = '<span>' + icons[type] + '</span> ' + msg;
-            c.appendChild(t);
-            setTimeout(function() {
-                t.style.animation = 'toastSlide 0.3s reverse';
-                setTimeout(function() { t.remove(); }, 300);
-            }, 3000);
+        function showStatus(msg, type) {
+            var s = document.getElementById('status');
+            s.className = 'status ' + type;
+            s.textContent = msg;
         }
 
         function deployBot() {
-            const token = document.getElementById('botToken').value.trim();
-            const chatId = document.getElementById('chatId').value.trim();
-            const tools = allToolsEnabled ? Object.keys(TOOLS) : Array.from(selectedTools);
+            var token = document.getElementById('token').value.trim();
+            var chatId = document.getElementById('chatId').value.trim();
+            var expiry = document.getElementById('expiry').value;
+            var tools = allTools ? ['phone','aadhaar','aadhaar_family','email','vehicle','github','instagram','tg_user','pan','tg_id','sms_bomber'] : Array.from(selectedTools);
 
-            if (!token) { showToast('Enter Bot Token!', 'error'); return; }
-            if (!chatId) { showToast('Enter Chat ID!', 'error'); return; }
-            if (tools.length === 0) { showToast('Select at least one tool!', 'error'); return; }
+            if (!token) { showStatus('Enter Bot Token!', 'error'); return; }
+            if (!chatId) { showStatus('Enter Chat ID!', 'error'); return; }
+            if (tools.length === 0) { showStatus('Select at least one tool!', 'error'); return; }
 
-            const expiry = expiryType === 'custom' ? document.getElementById('expiryDate').value : '';
-
-            document.getElementById('deployStatus').innerHTML = '<span style="color:#667eea;">⏳ Starting bot on server...</span>';
+            showStatus('Starting bot...', 'loading');
 
             fetch('/api/deploy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token, chat_id: chatId, tools, expiry })
+                body: JSON.stringify({ token: token, chat_id: chatId, tools: tools, expiry: expiry })
             })
-            .then(r => r.json())
-            .then(data => {
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
                 if (data.success) {
-                    showToast('Bot started on server!', 'success');
-                    document.getElementById('deployStatus').innerHTML = '<span style="color:#48bb78;">✅ Bot is running on server!</span>';
+                    showStatus('✅ Bot started successfully!', 'success');
                     loadBots();
                 } else {
-                    showToast(data.error || 'Failed to start bot', 'error');
-                    document.getElementById('deployStatus').innerHTML = '<span style="color:#f56565;">❌ ' + (data.error || 'Failed') + '</span>';
+                    showStatus('❌ ' + (data.error || 'Failed'), 'error');
                 }
             })
-            .catch(e => {
-                showToast('Server error: ' + e, 'error');
-                document.getElementById('deployStatus').innerHTML = '<span style="color:#f56565;">❌ Server not connected</span>';
+            .catch(function(e) {
+                showStatus('❌ Server error: ' + e, 'error');
             });
         }
 
         function loadBots() {
             fetch('/api/bots')
-            .then(r => r.json())
-            .then(data => {
-                const list = document.getElementById('botList');
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var list = document.getElementById('botList');
                 if (data.bots.length === 0) {
-                    list.innerHTML = '<div class="empty-history">No bots running. Deploy one above!</div>';
+                    list.innerHTML = '<p style="text-align:center;color:#666;">No bots running</p>';
                     return;
                 }
-                list.innerHTML = data.bots.map(bot => {
-                    return '<div class="history-item">' +
-                        '<div class="history-info">' +
-                        '<div class="history-token">' + bot.token_preview + '</div>' +
-                        '<div class="history-meta">' + bot.tools.length + ' tools • ' + bot.expiry + ' • Started: ' + bot.started + '</div>' +
+                list.innerHTML = data.bots.map(function(bot) {
+                    return '<div class="bot-item">' +
+                        '<div class="bot-info">' +
+                        '<div class="bot-token">' + bot.token_preview + '</div>' +
+                        '<div class="bot-meta">' + bot.tools.length + ' tools | ' + bot.expiry + '</div>' +
                         '</div>' +
-                        '<div class="history-actions">' +
-                        '<span class="status-badge ' + (bot.running ? 'status-running' : 'status-stopped') + '">' +
-                        '<span class="status-dot"></span>' + (bot.running ? 'Running' : 'Stopped') + '</span>' +
-                        '<button class="history-btn ' + (bot.running ? 'history-btn-stop' : 'history-btn-start') + '" onclick="toggleBot('' + bot.id + '')">' +
-                        (bot.running ? '⏹️ Stop' : '▶️ Start') + '</button>' +
-                        '<button class="history-btn history-btn-delete" onclick="deleteBot('' + bot.id + '')">🗑️</button>' +
-                        '</div></div>';
+                        '<div class="bot-actions">' +
+                        '<span class="badge ' + (bot.running ? 'running' : 'stopped') + '">' + (bot.running ? '● Running' : '○ Stopped') + '</span>' +
+                        '<button class="btn-small ' + (bot.running ? 'btn-stop' : 'btn-start') + '" onclick="toggleBot('' + bot.id + '')">' + (bot.running ? 'Stop' : 'Start') + '</button>' +
+                        '<button class="btn-small btn-delete" onclick="deleteBot('' + bot.id + '')">Delete</button>' +
+                        '</div>' +
+                        '</div>';
                 }).join('');
+            })
+            .catch(function(e) {
+                console.log('Error loading bots:', e);
             });
         }
 
         function toggleBot(id) {
             fetch('/api/toggle/' + id, { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                showToast(data.message, data.success ? 'info' : 'error');
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                showStatus(data.message, data.success ? 'success' : 'error');
                 loadBots();
             });
         }
@@ -472,14 +298,14 @@ HTML_PAGE = """
         function deleteBot(id) {
             if (!confirm('Delete this bot?')) return;
             fetch('/api/delete/' + id, { method: 'DELETE' })
-            .then(r => r.json())
-            .then(data => {
-                showToast(data.message, data.success ? 'info' : 'error');
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                showStatus(data.message, data.success ? 'success' : 'error');
                 loadBots();
             });
         }
 
-        setInterval(loadBots, 5000);
+        setInterval(loadBots, 3000);
         loadBots();
     </script>
 </body>
@@ -487,7 +313,7 @@ HTML_PAGE = """
 """
 
 # ============================================================
-# Bot Runner Class
+# BOT CLASS
 # ============================================================
 
 class TelegramBot:
@@ -501,7 +327,7 @@ class TelegramBot:
         self.thread = None
         self.offset = None
         self.waiting_for = {}
-        self.base_url = f"https://api.telegram.org/bot{token}"
+        self.base_url = "https://api.telegram.org/bot" + token
         self.api_key = "ftgamer2"
 
         self.apis = {
@@ -533,17 +359,17 @@ class TelegramBot:
         }
 
         self.prompts = {
-            'phone': ('📱 Phone Lookup', '📞 Send 10 digit mobile number:\nExample: <code>9876543210</code>'),
-            'aadhaar': ('🆔 Aadhaar Lookup', '🆔 Send 12 digit Aadhaar number:\nExample: <code>393933081942</code>'),
-            'aadhaar_family': ('👨‍👩‍👧 Aadhaar Family', '👨‍👩‍👧 Send 12 digit Aadhaar number for family lookup:\nExample: <code>984154610245</code>'),
-            'email': ('📧 Email Info', '📧 Send email address:\nExample: <code>airtel123@gmail.com</code>'),
-            'vehicle': ('🚗 Vehicle Lookup', '🚗 Send vehicle number:\nExample: <code>MH02FZ0555</code>'),
-            'github': ('🐙 GitHub Lookup', '🐙 Send GitHub username:\nExample: <code>ftgamer2</code>'),
-            'instagram': ('📸 Instagram Info', '📸 Send Instagram username:\nExample: <code>cristiano</code>'),
-            'tg_user': ('✈️ Telegram Info', '✈️ Send Telegram username (without @):\nExample: <code>username</code>'),
-            'pan': ('🪪 PAN → GST', '🪪 Send 10 character PAN number:\nExample: <code>ANXPV7978A</code>'),
-            'tg_id': ('🆔 Telegram ID', '🆔 Send Telegram numeric ID:\nExample: <code>7530266953</code>'),
-            'sms_bomber': ('💥 SMS Bomber', '💥 Send 10 digit phone number for SMS bombing:\nExample: <code>9876543210</code>'),
+            'phone': ('📱 Phone Lookup', 'Send 10 digit mobile number:'),
+            'aadhaar': ('🆔 Aadhaar Lookup', 'Send 12 digit Aadhaar number:'),
+            'aadhaar_family': ('👨‍👩‍👧 Aadhaar Family', 'Send 12 digit Aadhaar number:'),
+            'email': ('📧 Email Info', 'Send email address:'),
+            'vehicle': ('🚗 Vehicle Lookup', 'Send vehicle number:'),
+            'github': ('🐙 GitHub Lookup', 'Send GitHub username:'),
+            'instagram': ('📸 Instagram Info', 'Send Instagram username:'),
+            'tg_user': ('✈️ Telegram Info', 'Send Telegram username:'),
+            'pan': ('🪪 PAN to GST', 'Send 10 character PAN number:'),
+            'tg_id': ('🆔 Telegram ID', 'Send Telegram numeric ID:'),
+            'sms_bomber': ('💥 SMS Bomber', 'Send 10 digit phone number:'),
         }
 
     def check_expiry(self):
@@ -559,19 +385,19 @@ class TelegramBot:
             payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
             if reply_markup:
                 payload["reply_markup"] = json.dumps(reply_markup)
-            requests.post(f"{self.base_url}/sendMessage", json=payload, timeout=10)
+            requests.post(self.base_url + "/sendMessage", json=payload, timeout=10)
         except Exception as e:
-            print(f"[Bot {self.bot_id}] Send error: {e}")
+            print("[Bot " + self.bot_id + "] Send error: " + str(e))
 
     def get_updates(self):
         try:
             params = {"limit": 100, "timeout": 30}
             if self.offset:
                 params["offset"] = self.offset
-            resp = requests.get(f"{self.base_url}/getUpdates", params=params, timeout=35)
+            resp = requests.get(self.base_url + "/getUpdates", params=params, timeout=35)
             return resp.json()
         except Exception as e:
-            print(f"[Bot {self.bot_id}] Get updates error: {e}")
+            print("[Bot " + self.bot_id + "] Get updates error: " + str(e))
             return {"ok": False, "result": []}
 
     def call_api(self, url, params):
@@ -586,7 +412,7 @@ class TelegramBot:
             return {"error": str(e)}
 
     def format_response(self, data):
-        return f"<pre>{json.dumps(data, indent=2, ensure_ascii=False)}</pre>"
+        return "<pre>" + json.dumps(data, indent=2, ensure_ascii=False) + "</pre>"
 
     def create_keyboard(self):
         keyboard = []
@@ -603,13 +429,13 @@ class TelegramBot:
 
     def run(self):
         self.running = True
-        print(f"[Bot {self.bot_id}] Started")
-        self.send_message(self.chat_id, f"✅ Bot started!\nTools: {len(self.tools)}")
+        print("[Bot " + self.bot_id + "] Started")
+        self.send_message(self.chat_id, "Bot started!\nTools: " + str(len(self.tools)))
 
         while self.running:
             try:
                 if not self.check_expiry():
-                    self.send_message(self.chat_id, "❌ Bot expired! Contact admin.")
+                    self.send_message(self.chat_id, "Bot expired! Contact admin.")
                     break
 
                 updates = self.get_updates()
@@ -627,7 +453,7 @@ class TelegramBot:
                         continue
 
                     if text == "/start":
-                        welcome = "👋 <b>Welcome to FT-OSINT Bot!</b>\n\n🔍 Select a tool below!"
+                        welcome = "Welcome to FT-OSINT Bot!\n\nSelect a tool below!"
                         self.send_message(chat_id, welcome, self.create_keyboard())
                         self.waiting_for.pop(chat_id, None)
                         continue
@@ -641,7 +467,7 @@ class TelegramBot:
                         if chat_id in self.waiting_for:
                             state = self.waiting_for[chat_id]
                             if state in self.validators and self.validators[state](text):
-                                self.send_message(chat_id, "🔍 Processing...")
+                                self.send_message(chat_id, "Processing...")
                                 url, param = self.apis[state]
                                 params = {"key": self.api_key, param: text}
                                 if state == 'sms_bomber':
@@ -650,20 +476,7 @@ class TelegramBot:
                                 self.send_message(chat_id, self.format_response(result))
                                 self.waiting_for.pop(chat_id, None)
                             else:
-                                errors = {
-                                    'phone': '❌ Invalid! Send 10-digit number.',
-                                    'aadhaar': '❌ Invalid! Send 12-digit number.',
-                                    'aadhaar_family': '❌ Invalid! Send 12-digit number.',
-                                    'email': '❌ Invalid email!',
-                                    'vehicle': '❌ Invalid vehicle number!',
-                                    'github': '❌ Invalid username!',
-                                    'instagram': '❌ Invalid username!',
-                                    'tg_user': '❌ Invalid username!',
-                                    'pan': '❌ Invalid PAN! 10 chars required.',
-                                    'tg_id': '❌ Invalid ID! Numbers only.',
-                                    'sms_bomber': '❌ Invalid! Send 10-digit number.',
-                                }
-                                self.send_message(chat_id, errors.get(state, '❌ Invalid input!'))
+                                self.send_message(chat_id, "Invalid input! Try again.")
                             continue
 
                         self.send_message(chat_id, "I didn't understand. Use /start or select a tool.")
@@ -672,11 +485,11 @@ class TelegramBot:
                     time.sleep(1)
 
             except Exception as e:
-                print(f"[Bot {self.bot_id}] Loop error: {e}")
+                print("[Bot " + self.bot_id + "] Loop error: " + str(e))
                 time.sleep(3)
 
         self.running = False
-        print(f"[Bot {self.bot_id}] Stopped")
+        print("[Bot " + self.bot_id + "] Stopped")
 
     def start(self):
         if not self.running:
@@ -690,7 +503,7 @@ class TelegramBot:
         return True
 
 # ============================================================
-# Flask Routes
+# FLASK ROUTES
 # ============================================================
 
 @app.route('/')
@@ -699,65 +512,83 @@ def index():
 
 @app.route('/api/deploy', methods=['POST'])
 def deploy():
-    data = request.json
-    token = data.get('token', '').strip()
-    chat_id = data.get('chat_id', '').strip()
-    tools = data.get('tools', [])
-    expiry = data.get('expiry', '')
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data received"})
 
-    if not token or not chat_id or not tools:
-        return jsonify({"success": False, "error": "Missing required fields"})
+        token = data.get('token', '').strip()
+        chat_id = data.get('chat_id', '').strip()
+        tools = data.get('tools', [])
+        expiry = data.get('expiry', '')
 
-    bot_id = str(int(time.time()))
+        if not token:
+            return jsonify({"success": False, "error": "Bot token is required"})
+        if not chat_id:
+            return jsonify({"success": False, "error": "Chat ID is required"})
+        if not tools:
+            return jsonify({"success": False, "error": "Select at least one tool"})
 
-    for bid, bot in list(running_bots.items()):
-        if bot.token == token:
-            bot.stop()
-            del running_bots[bid]
+        bot_id = str(int(time.time()))
 
-    bot = TelegramBot(bot_id, token, chat_id, tools, expiry)
-    running_bots[bot_id] = bot
-    bot.start()
+        for bid, bot in list(running_bots.items()):
+            if bot.token == token:
+                bot.stop()
+                del running_bots[bid]
 
-    return jsonify({"success": True, "bot_id": bot_id, "message": "Bot started on server!"})
+        bot = TelegramBot(bot_id, token, chat_id, tools, expiry)
+        running_bots[bot_id] = bot
+        bot.start()
+
+        return jsonify({"success": True, "bot_id": bot_id, "message": "Bot started!"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 @app.route('/api/bots', methods=['GET'])
 def list_bots():
-    bots = []
-    for bid, bot in running_bots.items():
-        bots.append({
-            "id": bid,
-            "token_preview": bot.token[:15] + "..." if len(bot.token) > 15 else bot.token,
-            "chat_id": bot.chat_id,
-            "tools": bot.tools,
-            "expiry": bot.expiry or "Lifetime",
-            "running": bot.running,
-            "started": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-    return jsonify({"bots": bots})
+    try:
+        bots = []
+        for bid, bot in running_bots.items():
+            bots.append({
+                "id": bid,
+                "token_preview": bot.token[:15] + "..." if len(bot.token) > 15 else bot.token,
+                "chat_id": bot.chat_id,
+                "tools": bot.tools,
+                "expiry": bot.expiry or "Lifetime",
+                "running": bot.running,
+                "started": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+        return jsonify({"bots": bots})
+    except Exception as e:
+        return jsonify({"bots": [], "error": str(e)})
 
 @app.route('/api/toggle/<bot_id>', methods=['POST'])
 def toggle_bot(bot_id):
-    if bot_id not in running_bots:
-        return jsonify({"success": False, "error": "Bot not found"})
+    try:
+        if bot_id not in running_bots:
+            return jsonify({"success": False, "error": "Bot not found"})
 
-    bot = running_bots[bot_id]
-    if bot.running:
-        bot.stop()
-        return jsonify({"success": True, "message": "Bot stopped"})
-    else:
-        bot.start()
-        return jsonify({"success": True, "message": "Bot restarted"})
+        bot = running_bots[bot_id]
+        if bot.running:
+            bot.stop()
+            return jsonify({"success": True, "message": "Bot stopped"})
+        else:
+            bot.start()
+            return jsonify({"success": True, "message": "Bot restarted"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 @app.route('/api/delete/<bot_id>', methods=['DELETE'])
 def delete_bot(bot_id):
-    if bot_id not in running_bots:
-        return jsonify({"success": False, "error": "Bot not found"})
+    try:
+        if bot_id not in running_bots:
+            return jsonify({"success": False, "error": "Bot not found"})
 
-    running_bots[bot_id].stop()
-    del running_bots[bot_id]
-    return jsonify({"success": True, "message": "Bot deleted"})
+        running_bots[bot_id].stop()
+        del running_bots[bot_id]
+        return jsonify({"success": True, "message": "Bot deleted"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
-# THIS IS THE IMPORTANT PART - gunicorn needs this
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
