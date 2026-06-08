@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: ft-osint-bot
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: API_KEY
+        value: ftgamer2
+      - key: TOOL_PHONE
+        sync: false
+      - key: TOOL_AADHAAR
+        sync: false
+      - key: TOOL_AADHAAR_FAMILY
+        sync: false
+      - key: TOOL_EMAIL
+        sync: false
+      - key: TOOL_VEHICLE
+        sync: false
+      - key: TOOL_GITHUB
+        sync: false
+      - key: TOOL_INSTAGRAM
+        sync: false
+      - key: TOOL_TG_USER
+        sync: false
+      - key: TOOL_PAN
+        sync: false
+      - key: TOOL_TG_ID
+        sync: false
+      - key: TOOL_SMS_BOMBER
+        sync: false
+      - key: EXPIRY_DATE
+        sync: false
