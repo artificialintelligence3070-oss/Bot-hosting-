@@ -7,224 +7,15 @@ import time
 import os
 from datetime import datetime
 
+# Create Flask app - THIS MUST BE NAMED 'app' for gunicorn
 app = Flask(__name__)
 CORS(app)
 
-# Store running bots in memory
+# Store running bots
 running_bots = {}
 
 # ============================================================
-# Bot Runner Class
-# ============================================================
-
-class TelegramBot:
-    def __init__(self, bot_id, token, chat_id, tools, expiry=None):
-        self.bot_id = bot_id
-        self.token = token
-        self.chat_id = chat_id
-        self.tools = tools
-        self.expiry = expiry
-        self.running = False
-        self.thread = None
-        self.offset = None
-        self.waiting_for = {}
-        self.base_url = f"https://api.telegram.org/bot{token}"
-        self.api_key = "ftgamer2"
-
-        # API Endpoints
-        self.apis = {
-            'phone': ('https://ft-osint-api.duckdns.org/api/number', 'num'),
-            'aadhaar': ('https://ft-osint-api.duckdns.org/api/aadhar', 'num'),
-            'aadhaar_family': ('https://ft-osint-api.duckdns.org/api/adharfamily', 'num'),
-            'email': ('https://ft-osint-api.duckdns.org/api/email', 'email'),
-            'vehicle': ('https://ft-osint-api.duckdns.org/api/vehicle', 'vehicle'),
-            'github': ('https://ft-osint-api.duckdns.org/api/git', 'username'),
-            'instagram': ('https://ft-osint-api.duckdns.org/api/insta', 'username'),
-            'tg_user': ('https://ft-osint-api.duckdns.org/api/tg', 'info'),
-            'pan': ('https://ft-osint-api.duckdns.org/api/pan', 'pan'),
-            'tg_id': ('https://ft-osint-api.duckdns.org/api/tgidinfo', 'id'),
-            'sms_bomber': ('https://ft-osint-api.duckdns.org/api/bomber', 'number'),
-        }
-
-        # Validation functions
-        self.validators = {
-            'phone': lambda t: t and t.isdigit() and len(t) == 10,
-            'aadhaar': lambda t: t and t.isdigit() and len(t) == 12,
-            'aadhaar_family': lambda t: t and t.isdigit() and len(t) == 12,
-            'email': lambda t: t and "@" in t and "." in t.split("@")[-1],
-            'vehicle': lambda t: t and len(t) >= 5,
-            'github': lambda t: t and len(t) >= 1 and " " not in t,
-            'instagram': lambda t: t and len(t) >= 1 and " " not in t,
-            'tg_user': lambda t: t and len(t) >= 1,
-            'pan': lambda t: t and len(t) == 10,
-            'tg_id': lambda t: t and t.isdigit(),
-            'sms_bomber': lambda t: t and t.isdigit() and len(t) == 10,
-        }
-
-        # Tool prompts
-        self.prompts = {
-            'phone': ('📱 Phone Lookup', '📞 Send 10 digit mobile number:\nExample: <code>9876543210</code>'),
-            'aadhaar': ('🆔 Aadhaar Lookup', '🆔 Send 12 digit Aadhaar number:\nExample: <code>393933081942</code>'),
-            'aadhaar_family': ('👨‍👩‍👧 Aadhaar Family', '👨‍👩‍👧 Send 12 digit Aadhaar number:\nExample: <code>984154610245</code>'),
-            'email': ('📧 Email Info', '📧 Send email address:\nExample: <code>airtel123@gmail.com</code>'),
-            'vehicle': ('🚗 Vehicle Lookup', '🚗 Send vehicle number:\nExample: <code>MH02FZ0555</code>'),
-            'github': ('🐙 GitHub Lookup', '🐙 Send GitHub username:\nExample: <code>ftgamer2</code>'),
-            'instagram': ('📸 Instagram Info', '📸 Send Instagram username:\nExample: <code>cristiano</code>'),
-            'tg_user': ('✈️ Telegram Info', '✈️ Send Telegram username (without @):\nExample: <code>username</code>'),
-            'pan': ('🪪 PAN → GST', '🪪 Send 10 character PAN number:\nExample: <code>ANXPV7978A</code>'),
-            'tg_id': ('🆔 Telegram ID', '🆔 Send Telegram numeric ID:\nExample: <code>7530266953</code>'),
-            'sms_bomber': ('💥 SMS Bomber', '💥 Send 10 digit phone number:\nExample: <code>9876543210</code>'),
-        }
-
-    def check_expiry(self):
-        if not self.expiry:
-            return True
-        try:
-            return datetime.now() <= datetime.strptime(self.expiry, "%Y-%m-%d")
-        except:
-            return True
-
-    def send_message(self, chat_id, text, reply_markup=None):
-        try:
-            payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-            if reply_markup:
-                payload["reply_markup"] = json.dumps(reply_markup)
-            requests.post(f"{self.base_url}/sendMessage", json=payload, timeout=10)
-        except Exception as e:
-            print(f"[Bot {self.bot_id}] Send error: {e}")
-
-    def get_updates(self):
-        try:
-            params = {"limit": 100, "timeout": 30}
-            if self.offset:
-                params["offset"] = self.offset
-            resp = requests.get(f"{self.base_url}/getUpdates", params=params, timeout=35)
-            return resp.json()
-        except Exception as e:
-            print(f"[Bot {self.bot_id}] Get updates error: {e}")
-            return {"ok": False, "result": []}
-
-    def call_api(self, url, params):
-        try:
-            resp = requests.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            try:
-                return resp.json()
-            except:
-                return {"response": resp.text}
-        except Exception as e:
-            return {"error": str(e)}
-
-    def format_response(self, data):
-        return f"<pre>{json.dumps(data, indent=2, ensure_ascii=False)}</pre>"
-
-    def create_keyboard(self):
-        keyboard = []
-        row = []
-        for tool_key in self.tools:
-            if tool_key in self.prompts:
-                row.append({"text": self.prompts[tool_key][0]})
-                if len(row) == 2:
-                    keyboard.append(row)
-                    row = []
-        if row:
-            keyboard.append(row)
-        return {"keyboard": keyboard, "resize_keyboard": True, "one_time_keyboard": False}
-
-    def run(self):
-        self.running = True
-        print(f"[Bot {self.bot_id}] Started")
-        self.send_message(self.chat_id, f"✅ Bot started!\nTools: {len(self.tools)}")
-
-        while self.running:
-            try:
-                if not self.check_expiry():
-                    self.send_message(self.chat_id, "❌ Bot expired! Contact admin.")
-                    break
-
-                updates = self.get_updates()
-                if not updates.get("ok"):
-                    time.sleep(2)
-                    continue
-
-                for update in updates.get("result", []):
-                    self.offset = update["update_id"] + 1
-                    message = update.get("message", {})
-                    chat_id = message.get("chat", {}).get("id")
-                    text = message.get("text", "")
-
-                    if not chat_id or text is None:
-                        continue
-
-                    # /start
-                    if text == "/start":
-                        welcome = "👋 <b>Welcome to FT-OSINT Bot!</b>\n\n🔍 Select a tool below!"
-                        self.send_message(chat_id, welcome, self.create_keyboard())
-                        self.waiting_for.pop(chat_id, None)
-                        continue
-
-                    # Tool buttons
-                    for tool_key in self.tools:
-                        if tool_key in self.prompts and text == self.prompts[tool_key][0]:
-                            self.send_message(chat_id, self.prompts[tool_key][1])
-                            self.waiting_for[chat_id] = tool_key
-                            break
-                    else:
-                        # Handle input
-                        if chat_id in self.waiting_for:
-                            state = self.waiting_for[chat_id]
-                            if state in self.validators and self.validators[state](text):
-                                self.send_message(chat_id, f"🔍 Processing...")
-                                url, param = self.apis[state]
-                                params = {"key": self.api_key, param: text}
-                                if state == 'sms_bomber':
-                                    params["counter"] = 100
-                                result = self.call_api(url, params)
-                                self.send_message(chat_id, self.format_response(result))
-                                self.waiting_for.pop(chat_id, None)
-                            else:
-                                error_msg = {
-                                    'phone': '❌ Invalid! Send 10-digit number.',
-                                    'aadhaar': '❌ Invalid! Send 12-digit number.',
-                                    'aadhaar_family': '❌ Invalid! Send 12-digit number.',
-                                    'email': '❌ Invalid email!',
-                                    'vehicle': '❌ Invalid vehicle number!',
-                                    'github': '❌ Invalid username!',
-                                    'instagram': '❌ Invalid username!',
-                                    'tg_user': '❌ Invalid username!',
-                                    'pan': '❌ Invalid PAN! 10 chars required.',
-                                    'tg_id': '❌ Invalid ID! Numbers only.',
-                                    'sms_bomber': '❌ Invalid! Send 10-digit number.',
-                                }
-                                self.send_message(chat_id, error_msg.get(state, '❌ Invalid input!'))
-                            continue
-
-                        # Fallback
-                        self.send_message(chat_id, "I didn't understand. Use /start or select a tool.")
-
-                if not updates.get("result"):
-                    time.sleep(1)
-
-            except Exception as e:
-                print(f"[Bot {self.bot_id}] Loop error: {e}")
-                time.sleep(3)
-
-        self.running = False
-        print(f"[Bot {self.bot_id}] Stopped")
-
-    def start(self):
-        if not self.running:
-            self.thread = threading.Thread(target=self.run, daemon=True)
-            self.thread.start()
-            return True
-        return False
-
-    def stop(self):
-        self.running = False
-        return True
-
-# ============================================================
-# Flask Routes
+# HTML Frontend
 # ============================================================
 
 HTML_PAGE = """
@@ -233,7 +24,7 @@ HTML_PAGE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FT-OSINT Bot Hosting Platform</title>
+    <title>FT-OSINT Bot Hosting</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -602,7 +393,10 @@ HTML_PAGE = """
             const icons = { success: '✅', error: '❌', info: 'ℹ️' };
             t.innerHTML = '<span>' + icons[type] + '</span> ' + msg;
             c.appendChild(t);
-            setTimeout(() => { t.style.animation = 'toastSlide 0.3s reverse'; setTimeout(() => t.remove(), 300); }, 3000);
+            setTimeout(function() {
+                t.style.animation = 'toastSlide 0.3s reverse';
+                setTimeout(function() { t.remove(); }, 300);
+            }, 3000);
         }
 
         function deployBot() {
@@ -692,6 +486,213 @@ HTML_PAGE = """
 </html>
 """
 
+# ============================================================
+# Bot Runner Class
+# ============================================================
+
+class TelegramBot:
+    def __init__(self, bot_id, token, chat_id, tools, expiry=None):
+        self.bot_id = bot_id
+        self.token = token
+        self.chat_id = chat_id
+        self.tools = tools
+        self.expiry = expiry
+        self.running = False
+        self.thread = None
+        self.offset = None
+        self.waiting_for = {}
+        self.base_url = f"https://api.telegram.org/bot{token}"
+        self.api_key = "ftgamer2"
+
+        self.apis = {
+            'phone': ('https://ft-osint-api.duckdns.org/api/number', 'num'),
+            'aadhaar': ('https://ft-osint-api.duckdns.org/api/aadhar', 'num'),
+            'aadhaar_family': ('https://ft-osint-api.duckdns.org/api/adharfamily', 'num'),
+            'email': ('https://ft-osint-api.duckdns.org/api/email', 'email'),
+            'vehicle': ('https://ft-osint-api.duckdns.org/api/vehicle', 'vehicle'),
+            'github': ('https://ft-osint-api.duckdns.org/api/git', 'username'),
+            'instagram': ('https://ft-osint-api.duckdns.org/api/insta', 'username'),
+            'tg_user': ('https://ft-osint-api.duckdns.org/api/tg', 'info'),
+            'pan': ('https://ft-osint-api.duckdns.org/api/pan', 'pan'),
+            'tg_id': ('https://ft-osint-api.duckdns.org/api/tgidinfo', 'id'),
+            'sms_bomber': ('https://ft-osint-api.duckdns.org/api/bomber', 'number'),
+        }
+
+        self.validators = {
+            'phone': lambda t: t and t.isdigit() and len(t) == 10,
+            'aadhaar': lambda t: t and t.isdigit() and len(t) == 12,
+            'aadhaar_family': lambda t: t and t.isdigit() and len(t) == 12,
+            'email': lambda t: t and "@" in t and "." in t.split("@")[-1],
+            'vehicle': lambda t: t and len(t) >= 5,
+            'github': lambda t: t and len(t) >= 1 and " " not in t,
+            'instagram': lambda t: t and len(t) >= 1 and " " not in t,
+            'tg_user': lambda t: t and len(t) >= 1,
+            'pan': lambda t: t and len(t) == 10,
+            'tg_id': lambda t: t and t.isdigit(),
+            'sms_bomber': lambda t: t and t.isdigit() and len(t) == 10,
+        }
+
+        self.prompts = {
+            'phone': ('📱 Phone Lookup', '📞 Send 10 digit mobile number:\nExample: <code>9876543210</code>'),
+            'aadhaar': ('🆔 Aadhaar Lookup', '🆔 Send 12 digit Aadhaar number:\nExample: <code>393933081942</code>'),
+            'aadhaar_family': ('👨‍👩‍👧 Aadhaar Family', '👨‍👩‍👧 Send 12 digit Aadhaar number for family lookup:\nExample: <code>984154610245</code>'),
+            'email': ('📧 Email Info', '📧 Send email address:\nExample: <code>airtel123@gmail.com</code>'),
+            'vehicle': ('🚗 Vehicle Lookup', '🚗 Send vehicle number:\nExample: <code>MH02FZ0555</code>'),
+            'github': ('🐙 GitHub Lookup', '🐙 Send GitHub username:\nExample: <code>ftgamer2</code>'),
+            'instagram': ('📸 Instagram Info', '📸 Send Instagram username:\nExample: <code>cristiano</code>'),
+            'tg_user': ('✈️ Telegram Info', '✈️ Send Telegram username (without @):\nExample: <code>username</code>'),
+            'pan': ('🪪 PAN → GST', '🪪 Send 10 character PAN number:\nExample: <code>ANXPV7978A</code>'),
+            'tg_id': ('🆔 Telegram ID', '🆔 Send Telegram numeric ID:\nExample: <code>7530266953</code>'),
+            'sms_bomber': ('💥 SMS Bomber', '💥 Send 10 digit phone number for SMS bombing:\nExample: <code>9876543210</code>'),
+        }
+
+    def check_expiry(self):
+        if not self.expiry:
+            return True
+        try:
+            return datetime.now() <= datetime.strptime(self.expiry, "%Y-%m-%d")
+        except:
+            return True
+
+    def send_message(self, chat_id, text, reply_markup=None):
+        try:
+            payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+            if reply_markup:
+                payload["reply_markup"] = json.dumps(reply_markup)
+            requests.post(f"{self.base_url}/sendMessage", json=payload, timeout=10)
+        except Exception as e:
+            print(f"[Bot {self.bot_id}] Send error: {e}")
+
+    def get_updates(self):
+        try:
+            params = {"limit": 100, "timeout": 30}
+            if self.offset:
+                params["offset"] = self.offset
+            resp = requests.get(f"{self.base_url}/getUpdates", params=params, timeout=35)
+            return resp.json()
+        except Exception as e:
+            print(f"[Bot {self.bot_id}] Get updates error: {e}")
+            return {"ok": False, "result": []}
+
+    def call_api(self, url, params):
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            try:
+                return resp.json()
+            except:
+                return {"response": resp.text}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def format_response(self, data):
+        return f"<pre>{json.dumps(data, indent=2, ensure_ascii=False)}</pre>"
+
+    def create_keyboard(self):
+        keyboard = []
+        row = []
+        for tool_key in self.tools:
+            if tool_key in self.prompts:
+                row.append({"text": self.prompts[tool_key][0]})
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+        if row:
+            keyboard.append(row)
+        return {"keyboard": keyboard, "resize_keyboard": True, "one_time_keyboard": False}
+
+    def run(self):
+        self.running = True
+        print(f"[Bot {self.bot_id}] Started")
+        self.send_message(self.chat_id, f"✅ Bot started!\nTools: {len(self.tools)}")
+
+        while self.running:
+            try:
+                if not self.check_expiry():
+                    self.send_message(self.chat_id, "❌ Bot expired! Contact admin.")
+                    break
+
+                updates = self.get_updates()
+                if not updates.get("ok"):
+                    time.sleep(2)
+                    continue
+
+                for update in updates.get("result", []):
+                    self.offset = update["update_id"] + 1
+                    message = update.get("message", {})
+                    chat_id = message.get("chat", {}).get("id")
+                    text = message.get("text", "")
+
+                    if not chat_id or text is None:
+                        continue
+
+                    if text == "/start":
+                        welcome = "👋 <b>Welcome to FT-OSINT Bot!</b>\n\n🔍 Select a tool below!"
+                        self.send_message(chat_id, welcome, self.create_keyboard())
+                        self.waiting_for.pop(chat_id, None)
+                        continue
+
+                    for tool_key in self.tools:
+                        if tool_key in self.prompts and text == self.prompts[tool_key][0]:
+                            self.send_message(chat_id, self.prompts[tool_key][1])
+                            self.waiting_for[chat_id] = tool_key
+                            break
+                    else:
+                        if chat_id in self.waiting_for:
+                            state = self.waiting_for[chat_id]
+                            if state in self.validators and self.validators[state](text):
+                                self.send_message(chat_id, "🔍 Processing...")
+                                url, param = self.apis[state]
+                                params = {"key": self.api_key, param: text}
+                                if state == 'sms_bomber':
+                                    params["counter"] = 100
+                                result = self.call_api(url, params)
+                                self.send_message(chat_id, self.format_response(result))
+                                self.waiting_for.pop(chat_id, None)
+                            else:
+                                errors = {
+                                    'phone': '❌ Invalid! Send 10-digit number.',
+                                    'aadhaar': '❌ Invalid! Send 12-digit number.',
+                                    'aadhaar_family': '❌ Invalid! Send 12-digit number.',
+                                    'email': '❌ Invalid email!',
+                                    'vehicle': '❌ Invalid vehicle number!',
+                                    'github': '❌ Invalid username!',
+                                    'instagram': '❌ Invalid username!',
+                                    'tg_user': '❌ Invalid username!',
+                                    'pan': '❌ Invalid PAN! 10 chars required.',
+                                    'tg_id': '❌ Invalid ID! Numbers only.',
+                                    'sms_bomber': '❌ Invalid! Send 10-digit number.',
+                                }
+                                self.send_message(chat_id, errors.get(state, '❌ Invalid input!'))
+                            continue
+
+                        self.send_message(chat_id, "I didn't understand. Use /start or select a tool.")
+
+                if not updates.get("result"):
+                    time.sleep(1)
+
+            except Exception as e:
+                print(f"[Bot {self.bot_id}] Loop error: {e}")
+                time.sleep(3)
+
+        self.running = False
+        print(f"[Bot {self.bot_id}] Stopped")
+
+    def start(self):
+        if not self.running:
+            self.thread = threading.Thread(target=self.run, daemon=True)
+            self.thread.start()
+            return True
+        return False
+
+    def stop(self):
+        self.running = False
+        return True
+
+# ============================================================
+# Flask Routes
+# ============================================================
+
 @app.route('/')
 def index():
     return render_template_string(HTML_PAGE)
@@ -709,13 +710,11 @@ def deploy():
 
     bot_id = str(int(time.time()))
 
-    # Stop existing bot with same token
     for bid, bot in list(running_bots.items()):
         if bot.token == token:
             bot.stop()
             del running_bots[bid]
 
-    # Create and start new bot
     bot = TelegramBot(bot_id, token, chat_id, tools, expiry)
     running_bots[bot_id] = bot
     bot.start()
@@ -759,5 +758,6 @@ def delete_bot(bot_id):
     del running_bots[bot_id]
     return jsonify({"success": True, "message": "Bot deleted"})
 
+# THIS IS THE IMPORTANT PART - gunicorn needs this
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
