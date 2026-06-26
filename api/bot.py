@@ -13,10 +13,13 @@ logger = logging.getLogger(__name__)
 # Initialize Flask environment
 app = Flask(__name__)
 
-# Virtual database tracking user files/deployments (Max 3 slots per user)
+# 🌟 CRITICAL VERCEL FIX: Expose the handler alias so Vercel finds the application object instantly
+handler = app
+
+# In-memory virtual database tracking user files/deployments (Max 3 slots per user)
 USER_DATA = {}
 
-# Persistent Menu Layout
+# Persistent Custom Menu Layout
 MAIN_MENU = [
     [KeyboardButton("📤 Upload File"), KeyboardButton("🔍 Check Files")],
     [KeyboardButton("🚀 Start Bot"), KeyboardButton("🔄 Restart Bot")],
@@ -24,31 +27,31 @@ MAIN_MENU = [
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
 
-# Fetch system configurations securely
+# Fetch system tokens securely from Vercel Environment Settings
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "8842248531:AAFLjUKst9mYf2IJgP2j4sSK4p_B5tymkik")
 VERCEL_TOKEN = os.environ.get("VERCEL_TOKEN")
 
-# Build Telegram Application backend instance (Webhook mode - no run_polling)
+# Build Telegram Application backend instance (Serverless Webhook Mode)
 tg_app = Application.builder().token(TOKEN).updater(None).build()
 
 async def start(update: Update, context) -> None:
-    """Triggered on /start. Tracks slots and outputs user profile metrics."""
+    """Triggered on /start. Tracks slots and outputs user profile metrics with their logo."""
     user = update.effective_user
     chat_id = update.effective_chat.id
     
     if chat_id not in USER_DATA:
         USER_DATA[chat_id] = {"files": {}, "status": "idle", "deployment_url": None}
 
-    # Fetch User Avatar
+    # Fetch User Profile Photo / Avatar
     profile_photos = await context.bot.get_user_profile_photos(user_id=user.id, limit=1)
     
     profile_text = (
         f"👋 *Welcome to the Automated Vercel Hosting System!*\n\n"
-        f"👤 *Your Profile Metadata:*\n"
+        f"👤 *Your Profile Details:*\n"
         f"┣ 📛 *Name:* {user.first_name} {user.last_name or ''}\n"
         f"┣ 🆔 *Chat ID:* `{chat_id}`\n"
         f"┗ 🏷️ *Username:* @{user.username or 'None'}\n\n"
-        f"📊 *Slot Allocations:* {len(USER_DATA[chat_id]['files'])}/3 used."
+        f"📊 *Slot Capacity:* {len(USER_DATA[chat_id]['files'])}/3 slots filled."
     )
 
     if profile_photos.total_count > 0:
@@ -60,7 +63,7 @@ async def start(update: Update, context) -> None:
         await update.message.reply_text(text=profile_text, parse_mode="Markdown", reply_markup=REPLY_MARKUP)
 
 async def handle_menu_options(update: Update, context) -> None:
-    """Evaluates text strings sent from bottom application panel."""
+    """Evaluates text buttons from the custom menu keyboard layout."""
     text = update.message.text
     chat_id = update.effective_chat.id
     
@@ -72,13 +75,13 @@ async def handle_menu_options(update: Update, context) -> None:
             await update.message.reply_text("❌ All 3 hosting slots are full! Delete active instances to free space.")
             return
         USER_DATA[chat_id]["status"] = "awaiting_file"
-        await update.message.reply_text("📝 Drop your code script attachment file (`.py` or `.js`). Max 3 files:")
+        await update.message.reply_text("📝 Drop your script attachment file (`.py` or `.js`). Max 3 files:")
 
     elif text == "🔍 Check Files":
         files = USER_DATA[chat_id]["files"]
         url = USER_DATA[chat_id]["deployment_url"]
         if not files:
-            await update.message.reply_text("📭 Your configuration profile slot allocations are clear.")
+            await update.message.reply_text("📭 Your configuration slots are clear.")
         else:
             file_list = "\n".join([f"📄 `{name}`" for name in files.keys()])
             status_url = f"\n\n🔗 *Live Deploy URL:* {url}" if url else "\n\n⚠️ *Status:* Ready. Tap 🚀 Start Bot."
@@ -111,7 +114,7 @@ async def handle_menu_options(update: Update, context) -> None:
         await update.message.reply_text("🗑️ Active host structures completely removed. Slots reset to 0/3.")
 
 async def handle_document(update: Update, context) -> None:
-    """Intercerts files, extracts contents, and assigns them to internal storage memory."""
+    """Intercepts incoming attachments and assigns them to internal user hosting slots."""
     chat_id = update.effective_chat.id
     
     if chat_id not in USER_DATA or USER_DATA[chat_id]["status"] != "awaiting_file":
@@ -122,7 +125,7 @@ async def handle_document(update: Update, context) -> None:
     ext = os.path.splitext(filename)[1].lower()
 
     if ext not in ['.py', '.js']:
-        await update.message.reply_text("❌ Rejected! Only `.py` and `.js` formats are accepted.")
+        await update.message.reply_text("❌ Rejected! Only `.py` and `.js` file formats are handled.")
         return
 
     file_obj = await context.bot.get_file(doc.file_id)
@@ -137,7 +140,7 @@ async def handle_document(update: Update, context) -> None:
     )
 
 def deploy_to_vercel(chat_id: int) -> str:
-    """Programmatically pushes the user's uploaded scripts straight into Vercel's Engine via API."""
+    """Pushes user code directly to Vercel REST deployment platform endpoints."""
     if not VERCEL_TOKEN:
         logger.error("Missing VERCEL_TOKEN Environment Setting")
         return None
@@ -189,7 +192,7 @@ def index():
 
 @app.route("/", methods=["POST"])
 def webhook():
-    """Vercel execution route entry point."""
+    """Main route Vercel fires upon incoming webhook triggers."""
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, tg_app.bot)
@@ -197,5 +200,5 @@ def webhook():
         tg_app.process_update(update)
         return jsonify({"status": "processed"}), 200
     except Exception as e:
-        logger.error(f"Error lifecycle processing webhook: {e}")
+        logger.error(f"Error processing update payload: {e}")
         return jsonify({"error": str(e)}), 500
