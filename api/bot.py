@@ -10,11 +10,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Flask environment
+# 🌟 CRITICAL VERCEL FIX: Must be named 'app' inside 'api/bot.py'
 app = Flask(__name__)
-
-# 🌟 CRITICAL VERCEL FIX: Expose the handler alias so Vercel finds the application object instantly
-handler = app
 
 # In-memory virtual database tracking user files/deployments (Max 3 slots per user)
 USER_DATA = {}
