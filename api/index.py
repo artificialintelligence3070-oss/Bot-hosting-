@@ -10,7 +10,7 @@ app = Flask(__name__)
 # SECURITY PROTOCOL: Secure cookie encryption key
 app.secret_key = "crimson_vex_secure_vault_key_hash"
 
-# GATEWAY CONFIG: Updated with your live credentials
+# GATEWAY CONFIG: Configured with your live credentials
 RAZORPAY_KEY_ID = "rzp_live_TCZPUI3LDHONP8"
 RAZORPAY_KEY_SECRET = "t1elWq3O1G1j9x93GHBdfMQP"
 
@@ -70,9 +70,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <span class="text-xl font-bold tracking-widest text-white uppercase font-mono">VEX<span class="text-red-500 font-light">_NET</span></span>
         </div>
         
-        <!-- DYNAMIC ACCOUNT MANAGER CONTROLLER -->
+        <!-- DYNAMIC ACCOUNT MANAGER CONTROLLER (SAFE ELEMENT TOGGLING) -->
         <div class="flex items-center gap-4 flex-wrap justify-center">
-            <div id="auth-state-area" class="text-xs font-mono"></div>
+            <div id="auth-state-area" class="text-xs font-mono">
+                <div id="auth-logged-in" class="hidden items-center gap-3">
+                    <span class="text-gray-400 font-mono">NODE: <span id="user-node-name" class="text-red-500 font-bold"></span></span>
+                    <button onclick="triggerLogout()" class="px-2.5 py-1 bg-red-950/40 border border-red-900/60 hover:bg-red-600 hover:text-white rounded text-[10px] uppercase transition-all font-mono">Disconnect</button>
+                </div>
+                <div id="auth-logged-out" class="hidden">
+                    <button onclick="openAuthModal('login')" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all font-mono">Initialize Identity Link</button>
+                </div>
+            </div>
 
             <!-- AUTOMATED DELIVERY MAILBOX WIDGET -->
             <div onclick="openMailboxModal()" class="relative bg-neutral-950 border border-red-900/30 rounded-xl px-4 py-2 flex items-center gap-3 cursor-pointer hover:border-red-600 transition-all">
@@ -208,7 +216,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- SAFE INTERACTION CODE ASSETS -->
+    <!-- SAFE INTERACTION CODE ASSETS (NO ESCAPE CONFLICTS) -->
     <script>
         const products_schema = JSON_PRODUCTS_PLACEHOLDER;
         let active_session_username = SESSION_USER_PLACEHOLDER;
@@ -216,7 +224,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let current_auth_mode = 'login'; 
         let user_purchased_keys = [];
 
-        // Dynamic HTML card layout architecture
         const RAW_CARD_LAYOUT = `
             <div class="premium-dark-gradient border border-neutral-900 p-6 rounded-2xl card-transform flex flex-col justify-between relative overflow-hidden">
                 <div>
@@ -239,14 +246,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
 
         function evaluateSessionUIRender() {
-            const area = document.getElementById('auth-state-area');
+            const loggedInDiv = document.getElementById('auth-logged-in');
+            const loggedOutDiv = document.getElementById('auth-logged-out');
+            const nodeNameSpan = document.getElementById('user-node-name');
+            
             if (active_session_username) {
-                area.innerHTML = '<div class="flex items-center gap-3">' +
-                    '<span class="text-gray-400 font-mono">NODE: <span class="text-red-500 font-bold">' + active_session_username + '</span></span>' +
-                    '<button onclick="triggerLogout()" class="px-2.5 py-1 bg-red-950/40 border border-red-900/60 hover:bg-red-600 hover:text-white rounded text-[10px] uppercase transition-all font-mono">Disconnect</button>' +
-                '</div>';
+                nodeNameSpan.innerText = active_session_username;
+                loggedInDiv.classList.remove('hidden');
+                loggedInDiv.classList.add('flex');
+                loggedOutDiv.classList.add('hidden');
             } else {
-                area.innerHTML = '<button onclick="openAuthModal(\\'login\\')" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider transition-all font-mono">Initialize Identity Link</button>';
+                loggedInDiv.classList.add('hidden');
+                loggedInDiv.classList.remove('flex');
+                loggedOutDiv.classList.remove('hidden');
             }
         }
 
@@ -586,4 +598,3 @@ def clear_signature_token():
 
 if __name__ == '__main__':
     app.run(port=3000, debug=True)
-
